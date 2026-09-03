@@ -8,7 +8,10 @@
 <div class="box"><h2>🌊 PORTAL連携</h2><input id="portal" value="https://marine-pharmacy0963.github.io/MARINE-TRICK/" placeholder="PORTAL URL"><input id="portalConfig" value="../marine-theme.json" placeholder="ポータル共通設定JSONのURL"><div class="small">公開版はこの共通設定JSONを読み込み、ポータルで設定した背景画像を自動反映します。読み込めない場合は従来の水色背景で表示します。</div></div>
 <div class="box"><h2>📦 書き出し</h2><button id="export">公開用 index.html を書き出す</button><div class="small">服用履歴にはキャラ画像そのものではなく固定IDを保存します。characters.json内で同じIDの画像を差し替えても、過去のスタンプ履歴は維持されます。</div></div>
 </main><script>
-const ADMIN_PASSWORD="3103";function tryUnlock(){if(adminPass.value===ADMIN_PASSWORD){lock.classList.add("hidden");masterMain.classList.remove("hidden");sessionStorage.setItem("marine_medicine_master_auth","1");lockMsg.textContent=""}else{lockMsg.textContent="⚠️ パスワードが違います"}}unlock.onclick=tryUnlock;adminPass.onkeydown=e=>{if(e.key==="Enter")tryUnlock()};if(sessionStorage.getItem("marine_medicine_master_auth")==="1"){lock.classList.add("hidden");masterMain.classList.remove("hidden")};
+const ADMIN_PASSWORD="3103";
+const lockEl=document.getElementById("lock"),masterMainEl=document.getElementById("masterMain"),adminPassEl=document.getElementById("adminPass"),unlockBtn=document.getElementById("unlock"),lockMsgEl=document.getElementById("lockMsg");
+function tryUnlock(){if(adminPassEl.value===ADMIN_PASSWORD){lockEl.classList.add("hidden");masterMainEl.classList.remove("hidden");sessionStorage.setItem("marine_medicine_master_auth","1");lockMsgEl.textContent=""}else{lockMsgEl.textContent="⚠️ パスワードが違います";adminPassEl.focus();adminPassEl.select()}}
+unlockBtn.addEventListener("click",tryUnlock);adminPassEl.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();tryUnlock()}});if(sessionStorage.getItem("marine_medicine_master_auth")==="1"){lockEl.classList.add("hidden");masterMainEl.classList.remove("hidden")};
 jsonFile.onchange=e=>{let f=e.target.files[0];if(!f)return;let r=new FileReader();r.onload=()=>{try{let j=JSON.parse(r.result),n=(j.characters||[]).filter(x=>x.active&&x.uses?.medicine).length;status.className="ok";status.textContent="✅ 読み込みOK：服用スタンプ対象 "+n+"キャラ"}catch(err){status.className="warn";status.textContent="⚠️ JSONを確認できませんでした"}};r.readAsText(f)};
 export.onclick=()=>{
 let J=JSON.stringify(jsonUrl.value),P=JSON.stringify(portal.value),C=JSON.stringify(portalConfig.value);
