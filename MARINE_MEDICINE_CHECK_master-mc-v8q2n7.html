@@ -148,8 +148,8 @@ adminPassEl.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault(
 if(sessionStorage.getItem("marine_medicine_master_auth")==="1"){lockEl.classList.add("hidden");masterMainEl.classList.remove("hidden")}
 
 function nowText(){return new Date().toLocaleString("ja-JP",{year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit"})}
-function settings(){
- return {
+function settings(includeSource=true){
+ const data={
   version:5,
   jsonUrl:$("jsonUrl").value,
   portal:$("portal").value,
@@ -157,9 +157,11 @@ function settings(){
   imageSize:$("imageSize").value,
   imageQuality:$("imageQuality").value,
   allowImageSave:$("allowImageSave").checked,
-  order, overrides, sourceChars, backgroundOverride,
+  order, overrides, backgroundOverride,
   updatedAt:nowText()
  };
+ if(includeSource)data.sourceChars=sourceChars;
+ return data;
 }
 function applySettings(s){
  if(!s)return;
@@ -175,8 +177,14 @@ function applySettings(s){
 }
 let saveTimer;
 function save(auto=true){
- const s=settings(); localStorage.setItem(STORE_KEY,JSON.stringify(s));
- $("updatedAt").textContent=s.updatedAt; $("saveState").textContent=auto?"自動保存済み":"手動保存済み";
+ const s=settings(false);
+ try{
+  localStorage.setItem(STORE_KEY,JSON.stringify(s));
+  $("saveState").textContent=auto?"自動保存済み":"手動保存済み";
+ }catch(err){
+  $("saveState").textContent="容量超過（JSONバックアップ推奨）";
+ }
+ $("updatedAt").textContent=s.updatedAt;
 }
 function scheduleSave(){clearTimeout(saveTimer);$("saveState").textContent="変更あり";saveTimer=setTimeout(()=>save(true),350)}
 ["jsonUrl","portal","portalConfig","imageSize","imageQuality","allowImageSave"].forEach(id=>{
@@ -199,7 +207,7 @@ try{applySettings(JSON.parse(localStorage.getItem(STORE_KEY)||"null"))}catch(e){
 if(!$("updatedAt").textContent)$("updatedAt").textContent=nowText();
 
 $("exportSettings").onclick=()=>{
- const blob=new Blob([JSON.stringify(settings(),null,2)],{type:"application/json;charset=utf-8"});
+ const blob=new Blob([JSON.stringify(settings(true),null,2)],{type:"application/json;charset=utf-8"});
  downloadBlob(blob,"MARINE_MEDICINE_CHECK_settings.json");
 };
 $("importSettingsBtn").onclick=()=>$("importSettings").click();
