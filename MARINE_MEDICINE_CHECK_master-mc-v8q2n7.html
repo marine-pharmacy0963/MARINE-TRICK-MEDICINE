@@ -89,25 +89,28 @@ button.danger{background:#b94a48}
 <div class="box">
 <h2>🖼️ 画像設定</h2>
 <div class="row">
-<label>書き出し画像の最大解像度
+<label>キャラ画像の最大解像度
 <select id="imageSize">
 <option value="original">元画像</option>
 <option value="1024">1024px</option>
 <option value="768">768px</option>
-<option value="512" selected>512px</option>
+<option value="512">512px</option>
 <option value="384">384px</option>
 <option value="256">256px</option>
+<option value="192">192px</option>
+<option value="128" selected>128px（おすすめ）</option>
+<option value="96">96px（最軽量）</option>
 </select></label>
 <label>JPEG/WebP圧縮品質
 <select id="imageQuality">
 <option value="0.95">高画質 95%</option>
-<option value="0.85" selected>標準 85%</option>
-<option value="0.72">軽量 72%</option>
+<option value="0.85">標準 85%</option>
+<option value="0.72" selected>軽量 72%（おすすめ）</option>
 <option value="0.60">かなり軽量 60%</option>
 </select></label>
 </div>
 <label class="toggle"><input id="allowImageSave" type="checkbox" checked> 公開側でキャラ画像の長押し・右クリック保存を許可する</label>
-<div class="small">画像差し替えを登録すると、公開HTML内に圧縮した画像を埋め込みます。元の characters.json 自体は変更しません。</div>
+<div class="small">公開HTMLを書き出すとき、登録済みのキャラ画像もまとめて指定サイズへ軽量化します。元の characters.json 自体は変更しません。背景画像は見栄えを保つため別の解像度で保存します。</div>
 </div>
 
 <div class="box">
@@ -150,7 +153,8 @@ if(sessionStorage.getItem("marine_medicine_master_auth")==="1"){lockEl.classList
 function nowText(){return new Date().toLocaleString("ja-JP",{year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit"})}
 function settings(includeSource=true){
  const data={
-  version:5,
+  version:6,
+  compressionPresetVersion:1,
   jsonUrl:$("jsonUrl").value,
   portal:$("portal").value,
   portalConfig:$("portalConfig").value,
@@ -166,6 +170,7 @@ function settings(includeSource=true){
 function applySettings(s){
  if(!s)return;
  ["jsonUrl","portal","portalConfig","imageSize","imageQuality"].forEach(k=>{if(s[k]!==undefined)$(k).value=s[k]});
+ if(!s.compressionPresetVersion){$("imageSize").value="128";$("imageQuality").value="0.72"}
  if(s.allowImageSave!==undefined)$("allowImageSave").checked=!!s.allowImageSave;
  order=Array.isArray(s.order)?s.order:[];
  overrides=s.overrides&&typeof s.overrides==="object"?s.overrides:{};
@@ -199,7 +204,7 @@ function updateBackgroundPreview(){
 $("backgroundBtn").onclick=()=>$("backgroundFile").click();
 $("backgroundFile").onchange=async e=>{
  const f=e.target.files[0];if(!f)return;
- try{backgroundOverride=await compressImage(f);updateBackgroundPreview();scheduleSave()}catch(err){alert("背景画像を読み込めませんでした。")}e.target.value="";
+ try{backgroundOverride=await compressImage(f,1600,0.82);updateBackgroundPreview();scheduleSave()}catch(err){alert("背景画像を読み込めませんでした。")}e.target.value="";
 };
 $("clearBackground").onclick=()=>{backgroundOverride="";updateBackgroundPreview();scheduleSave()};
 
@@ -268,42 +273,57 @@ function normalizeMedicineChar(x){
  return {...x,active:x?.active!==false,image,uses:{...(x?.uses||{}),medicine:medicineEnabled(x)}};
 }
 function medicineCharsFrom(j){return (j?.characters||j?.chars||[]).map(normalizeMedicineChar).filter(x=>x.active&&x.uses.medicine)}
-function compressImage(file){
+function compressDataImage(src,maxSize,quality){
+ return new Promise(resolve=>{
+  if(!src||!src.startsWith("data:image/"))return resolve(src||"");
+  const im=new Image();im.onerror=()=>resolve(src);im.onload=()=>{
+   const selected=$("imageSize").value,lim=maxSize||(selected==="original"?Math.max(im.width,im.height):(Number(selected)||128)),scale=Math.min(1,lim/Math.max(im.width,im.height));
+   const w=Math.max(1,Math.round(im.width*scale)),h=Math.max(1,Math.round(im.height*scale)),c=document.createElement("canvas");
+   c.width=w;c.height=h;c.getContext("2d").drawImage(im,0,0,w,h);
+   try{resolve(c.toDataURL("image/webp",quality??Number($("imageQuality").value)))}catch(e){resolve(src)}
+  };im.src=src;
+ });
+}
+function compressImage(file,maxSize,quality){
  return new Promise((resolve,reject)=>{
   const r=new FileReader();r.onerror=reject;r.onload=()=>{
-   const im=new Image();im.onerror=reject;im.onload=()=>{
-    const lim=$("imageSize").value==="original"?Math.max(im.width,im.height):Number($("imageSize").value);
-    const scale=Math.min(1,lim/Math.max(im.width,im.height)),w=Math.max(1,Math.round(im.width*scale)),h=Math.max(1,Math.round(im.height*scale));
-    const c=document.createElement("canvas");c.width=w;c.height=h;c.getContext("2d").drawImage(im,0,0,w,h);
-    const transparent=file.type==="image/png"||file.type==="image/webp";
-    resolve(c.toDataURL(transparent?"image/webp":"image/jpeg",Number($("imageQuality").value)));
-   };im.src=r.result;
+   const chosen=$("imageSize").value==="original"?100000:Number($("imageSize").value);
+   compressDataImage(r.result,maxSize||chosen,quality).then(resolve,reject);
   };r.readAsDataURL(file);
  });
 }
 function downloadBlob(blob,name){const u=URL.createObjectURL(blob),a=document.createElement("a");a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1500)}
 
-$("exportHtml").onclick=()=>{
+$("exportHtml").onclick=async()=>{
  save(false);
  const J=JSON.stringify($("jsonUrl").value),P=JSON.stringify($("portal").value),C=JSON.stringify($("portalConfig").value);
- const O=JSON.stringify(order),V=JSON.stringify(overrides),E=JSON.stringify(orderedChars()),ALLOW=$("allowImageSave").checked?"true":"false",BG=JSON.stringify(backgroundOverride),UPDATED=JSON.stringify($("updatedAt").textContent);
+ const compactChars=[],compactOverrides={};
+ for(const ch of orderedChars()){const copy={...ch};copy.image=overrides[ch.id]?"":await compressDataImage(copy.image);compactChars.push(copy)}
+ for(const [id,v] of Object.entries(overrides))compactOverrides[id]={...v,dataUrl:await compressDataImage(v.dataUrl)};
+ const O=JSON.stringify(order),V=JSON.stringify(compactOverrides),E=JSON.stringify(compactChars),ALLOW=$("allowImageSave").checked?"true":"false",BG=JSON.stringify(backgroundOverride),UPDATED=JSON.stringify($("updatedAt").textContent);
  const h=`<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>服用チェック</title><style>
 *{box-sizing:border-box}html,body{min-height:100%}body{margin:0;background:#eaf7ff;background-size:cover;background-position:center;background-attachment:fixed;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP",sans-serif;color:#123}.w{max-width:1180px;margin:auto;padding:12px;position:relative}.panel{backdrop-filter:blur(2px);background:#fff;border-radius:16px;padding:12px;margin:9px 0}h1{color:#0878bd}.notice{background:#fff7dc;border:1px solid #ead27b}.times,.backup{display:flex;gap:7px;flex-wrap:wrap}.times label{background:#eef9ff;border-radius:9px;padding:7px;font-size:12px}.nav{display:flex;align-items:center;justify-content:space-between;gap:6px}.cal{overflow-x:hidden}.month{width:100%;min-width:0}.week,.day{display:grid;grid-template-columns:56px repeat(var(--cols),minmax(0,1fr));gap:2px}.week>*{background:#dff4ff;padding:6px 2px;text-align:center;font-size:10px;font-weight:bold;min-width:0}.day>*{background:#fff;border:1px solid #d9edf6;min-height:52px;padding:3px;min-width:0}.date{font-weight:bold;font-size:10px}.slot{text-align:center;display:flex;align-items:center;justify-content:center}.check{width:32px;height:32px;border:1px solid #9bcfe5;border-radius:8px;background:#f7fcff;padding:0;flex:0 0 auto}.check img{width:100%;height:100%;object-fit:contain}.slotLabel,.hidden{display:none!important}.sub,.small{font-size:9px;color:#678}.pdfrow{display:flex;gap:7px;flex-wrap:wrap;align-items:end}.pdfrow input{display:block;padding:7px}.btn{border:0;border-radius:9px;padding:9px;background:#1686c9;color:white;font-weight:bold}.btn.secondary{background:#64798a}.error{color:#a33}
 @media(max-width:560px){.w{padding:7px}.panel{padding:8px}.cal{padding:7px}.month h2{font-size:18px;margin:5px 0 8px}.week{display:none}.day{grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;border-top:2px solid #cde9f6;padding:5px 0}.day>.date{grid-column:1/-1;min-height:auto;border:0;background:#eef9ff;border-radius:8px;padding:5px 8px;text-align:left}.day>.slot{min-height:56px;border:1px solid #d9edf6;border-radius:8px;display:flex;flex-direction:column;gap:2px;padding:3px 1px}.slotLabel{display:block;font-size:8px;line-height:1.1;color:#567;white-space:nowrap}.check{width:34px;height:34px}.times label{font-size:11px;padding:6px}}
 @media(max-width:360px){.day{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @page{size:A4 portrait;margin:8mm}@media print{*{-webkit-print-color-adjust:exact;print-color-adjust:exact}body{background:#fff}.noPrint{display:none!important}.w{max-width:none;padding:0}.panel{padding:0;margin:0;border-radius:0;box-shadow:none}.cal{overflow:visible}.month{width:100%;min-width:0;page-break-after:always;break-after:page}.month:last-child{page-break-after:auto;break-after:auto}.month h2{font-size:14px;margin:0 0 4px}.week,.day{display:grid;grid-template-columns:42px repeat(var(--cols),minmax(0,1fr));gap:1px}.week>*{padding:2px 1px;font-size:7.5pt;line-height:1.05}.day>*{min-height:22px;height:22px;padding:1px}.date{font-size:7pt;line-height:1.05}.sub{font-size:6pt;line-height:1}.slot{display:flex;align-items:center;justify-content:center}.slotLabel{display:none!important}.check{width:18px;height:18px;border-radius:4px}.check img{width:100%;height:100%;object-fit:contain}}</style></head><body><div class="w">
-<h1>💊 服用チェック</h1><div class="panel notice noPrint small">このページの記録はブラウザ内に保存されます。端末・ブラウザごとに異なり、ブラウザデータの削除や端末変更などで消える場合があります。下のJSONバックアップを保存しておくと復元できます。</div>
-<div id="load" class="panel noPrint small">🐠 スタンプ画像を読み込み中...</div><div class="panel noPrint"><b>表示する服用時点</b><div id="timeOpts" class="times"></div></div>
+<h1>💊 服用チェック</h1><div class="panel notice noPrint small">このページの記録はブラウザ内の専用領域に保存されます。端末・ブラウザごとに異なり、ブラウザデータの削除や端末変更などで消える場合があります。下のJSONバックアップを保存しておくと復元できます。</div>
+<div id="load" class="panel noPrint small">🐠 スタンプ画像を読み込み中...</div><div id="storageState" class="panel noPrint small">💾 記録用の保存領域を確認中...</div><div class="panel noPrint"><b>表示する服用時点</b><div id="timeOpts" class="times"></div></div>
 <div class="panel noPrint nav"><button class="btn" id="prev">←</button><b id="label"></b><button class="btn" id="next">→</button></div><div id="calendar" class="panel cal"></div>
 <div class="panel noPrint"><b>💾 記録のバックアップ</b><div class="backup"><button class="btn" id="exportData">記録JSONを書き出す</button><button class="btn secondary" id="importDataBtn">記録JSONを読み込む</button><input class="hidden" id="importData" type="file" accept=".json,application/json"></div><div class="small">服用記録と表示する服用時点を、別端末でも復元できます。</div></div>
 <div class="panel noPrint"><b>📄 PDF用期間</b><div class="pdfrow"><label>開始月<input type="month" id="from"></label><label>終了月<input type="month" id="to"></label><button class="btn" id="printBtn">印刷 / PDF保存</button></div></div><div class="noPrint"><a id="back">← MARINE PORTALへ戻る</a><div class="small">更新日時：${UPDATED}</div></div></div>
 <script>
-const JSON_URL=${J},PORTAL=${P},PORTAL_CONFIG=${C},ORDER=${O},OVERRIDES=${V},EMBEDDED=${E},ALLOW_IMAGE_SAVE=${ALLOW},BACKGROUND_OVERRIDE=${BG},MASTER_UPDATED=${UPDATED},KEY="marine_medicine_checks_v3",SETKEY="marine_medicine_slots_v1";function normChar(x){const image=(typeof x?.image==="string"&&x.image)||(typeof x?.src==="string"&&x.src)||"";const med=!!(x?.uses?.medicine??x?.medicine);return {...x,active:x?.active!==false,image,uses:{...(x?.uses||{}),medicine:med}}}function medChars(j){return (j?.characters||j?.chars||[]).map(normChar).filter(x=>x.active&&x.uses.medicine)}
+const JSON_URL=${J},PORTAL=${P},PORTAL_CONFIG=${C},ORDER=${O},OVERRIDES=${V},EMBEDDED=${E},ALLOW_IMAGE_SAVE=${ALLOW},BACKGROUND_OVERRIDE=${BG},MASTER_UPDATED=${UPDATED},KEY="marine_medicine_checks_v3",SETKEY="marine_medicine_slots_v1",DBNAME="marine_medicine_records_v1",DBSTORE="state";function normChar(x){const image=(typeof x?.image==="string"&&x.image)||(typeof x?.src==="string"&&x.src)||"";const med=!!(x?.uses?.medicine??x?.medicine);return {...x,active:x?.active!==false,image,uses:{...(x?.uses||{}),medicine:med}}}function medChars(j){return (j?.characters||j?.chars||[]).map(normChar).filter(x=>x.active&&x.uses.medicine)}
 const slots=[["wake","起床時",""],["breakfast_pre","朝","食前"],["breakfast_post","朝","食後"],["lunch_pre","昼","食前"],["lunch_post","昼","食後"],["dinner_pre","夕","食前"],["dinner_post","夕","食後"],["bed","寝る前",""]];
 let CHARS=[],enabled,checks,view=new Date();view=new Date(view.getFullYear(),view.getMonth(),1);
 try{enabled=JSON.parse(localStorage.getItem(SETKEY)||"null")}catch(e){}if(!enabled)enabled=Object.fromEntries(slots.map(x=>[x[0],true]));
 try{checks=JSON.parse(localStorage.getItem(KEY)||"{}")}catch(e){checks={}}
-function save(){localStorage.setItem(KEY,JSON.stringify(checks));localStorage.setItem(SETKEY,JSON.stringify(enabled))}
+let recordDb=null,saveTimer=null;
+function openRecordDb(){return new Promise((resolve,reject)=>{if(!window.indexedDB)return reject(Error("IndexedDB unavailable"));let q=indexedDB.open(DBNAME,1);q.onupgradeneeded=()=>{if(!q.result.objectStoreNames.contains(DBSTORE))q.result.createObjectStore(DBSTORE)};q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(q.error)})}
+function dbRead(){return new Promise((resolve,reject)=>{let q=recordDb.transaction(DBSTORE,"readonly").objectStore(DBSTORE).get("main");q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(q.error)})}
+function dbWrite(){return new Promise((resolve,reject)=>{let t=recordDb.transaction(DBSTORE,"readwrite");t.objectStore(DBSTORE).put({checks,enabled,updatedAt:new Date().toISOString()},"main");t.oncomplete=resolve;t.onerror=()=>reject(t.error);t.onabort=()=>reject(t.error)})}
+function storageMessage(text,bad=false){storageState.innerHTML=(bad?'<span class="error">⚠️ ':'💾 ')+text+(bad?'</span>':'')}
+async function loadRecords(){try{recordDb=await openRecordDb();let saved=await dbRead();if(saved?.checks&&typeof saved.checks==="object")checks=saved.checks;if(saved?.enabled&&typeof saved.enabled==="object")enabled=saved.enabled;if(!saved)await dbWrite();storageMessage("記録を専用領域に保存できます。以前の記録も引き継ぎました。")}catch(e){recordDb=null;storageMessage("専用領域を使えないため通常保存を試します。チェック操作は続けられます。JSONバックアップもご利用ください。",true)}}
+function save(){clearTimeout(saveTimer);saveTimer=setTimeout(async()=>{if(recordDb){try{await dbWrite();storageMessage("記録を保存しました。");return}catch(e){recordDb=null}}try{localStorage.setItem(KEY,JSON.stringify(checks));localStorage.setItem(SETKEY,JSON.stringify(enabled));storageMessage("記録を保存しました（通常領域）。")}catch(e){storageMessage("端末の保存容量が不足しています。画面上のチェックは続けられますが、閉じる前に記録JSONを書き出してください。",true)}},80)}
 function dl(blob,name){let u=URL.createObjectURL(blob),a=document.createElement("a");a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1500)}
 exportData.onclick=()=>{let data={app:"MARINE_MEDICINE_CHECK",version:1,exportedAt:new Date().toISOString(),checks,enabled};dl(new Blob([JSON.stringify(data,null,2)],{type:"application/json;charset=utf-8"}),"MARINE_MEDICINE_CHECK_backup_"+new Date().toISOString().slice(0,10)+".json")};
 importDataBtn.onclick=()=>importData.click();importData.onchange=e=>{let f=e.target.files[0];if(!f)return;let r=new FileReader();r.onload=()=>{try{let j=JSON.parse(r.result);if(j.app!=="MARINE_MEDICINE_CHECK"||!j.checks||typeof j.checks!=="object")throw Error();checks=j.checks;if(j.enabled&&typeof j.enabled==="object")enabled=j.enabled;save();opts();draw();alert("記録JSONを読み込みました。")}catch(err){alert("この記録JSONは読み込めませんでした。")}};r.readAsText(f);e.target.value=""};
@@ -314,7 +334,7 @@ function draw(){calendar.innerHTML="";label.textContent=view.getFullYear()+"年 
 prev.onclick=()=>{view=new Date(view.getFullYear(),view.getMonth()-1,1);draw()};next.onclick=()=>{view=new Date(view.getFullYear(),view.getMonth()+1,1);draw()};
 printBtn.onclick=()=>{let a=from.value.split("-").map(Number),z=to.value.split("-").map(Number);if(!a[0]||!z[0])return;calendar.innerHTML="";let d=new Date(a[0],a[1]-1,1),end=new Date(z[0],z[1]-1,1);while(d<=end){drawMonth(d,calendar);d=new Date(d.getFullYear(),d.getMonth()+1,1)}setTimeout(()=>window.print(),100)};
 async function applyPortalBackground(){if(BACKGROUND_OVERRIDE){document.body.style.backgroundImage='linear-gradient(#eaf7ff55,#eaf7ff55),url("'+BACKGROUND_OVERRIDE+'")';return}try{let r=await fetch(PORTAL_CONFIG,{cache:"no-store"});if(!r.ok)throw Error();let j=await r.json();let bg=j.backgroundImage||j.background||j.bgImage||j.portalBackground||j?.theme?.backgroundImage||"";if(bg){try{bg=new URL(bg,PORTAL_CONFIG).href}catch(e){}document.body.style.backgroundImage="linear-gradient(#eaf7ff55,#eaf7ff55),url(\\""+bg+"\\")"}}catch(e){}}
-async function boot(){applyPortalBackground();try{let raw=[];if(Array.isArray(EMBEDDED)&&EMBEDDED.length){raw=medChars({characters:EMBEDDED})}else{let r=await fetch(JSON_URL,{cache:"no-store"});if(!r.ok)throw Error();let j=await r.json();raw=medChars(j)}let map=Object.fromEntries(raw.map(x=>[x.id,x]));CHARS=[...ORDER.map(id=>map[id]).filter(Boolean),...raw.filter(x=>!ORDER.includes(x.id))];CHARS=CHARS.map(x=>OVERRIDES[x.id]?.dataUrl?{...x,image:OVERRIDES[x.id].dataUrl}:x);let usable=CHARS.filter(x=>x.image).length;load.textContent="🐠 "+CHARS.length+"キャラのランダムスタンプを読み込みました。"+(usable<CHARS.length?"（画像あり "+usable+"キャラ）":"")}catch(e){load.innerHTML='<span class="error">⚠️ スタンプ画像を読み込めませんでした。MASTERでcharacters.jsonまたはバックアップJSONを一度読み込んでから、公開HTMLを書き出してください。</span>'}if(!ALLOW_IMAGE_SAVE){document.addEventListener("contextmenu",e=>{if(e.target.closest("img"))e.preventDefault()});document.addEventListener("dragstart",e=>{if(e.target.closest("img"))e.preventDefault()});document.querySelectorAll("img").forEach(x=>x.draggable=false)}opts();draw()}
+async function boot(){applyPortalBackground();await loadRecords();try{let raw=[];if(Array.isArray(EMBEDDED)&&EMBEDDED.length){raw=medChars({characters:EMBEDDED})}else{let r=await fetch(JSON_URL,{cache:"no-store"});if(!r.ok)throw Error();let j=await r.json();raw=medChars(j)}let map=Object.fromEntries(raw.map(x=>[x.id,x]));CHARS=[...ORDER.map(id=>map[id]).filter(Boolean),...raw.filter(x=>!ORDER.includes(x.id))];CHARS=CHARS.map(x=>OVERRIDES[x.id]?.dataUrl?{...x,image:OVERRIDES[x.id].dataUrl}:x);let usable=CHARS.filter(x=>x.image).length;load.textContent="🐠 "+CHARS.length+"キャラのランダムスタンプを読み込みました。"+(usable<CHARS.length?"（画像あり "+usable+"キャラ）":"")}catch(e){load.innerHTML='<span class="error">⚠️ スタンプ画像を読み込めませんでした。MASTERでcharacters.jsonまたはバックアップJSONを一度読み込んでから、公開HTMLを書き出してください。</span>'}if(!ALLOW_IMAGE_SAVE){document.addEventListener("contextmenu",e=>{if(e.target.closest("img"))e.preventDefault()});document.addEventListener("dragstart",e=>{if(e.target.closest("img"))e.preventDefault()});document.querySelectorAll("img").forEach(x=>x.draggable=false)}opts();draw()}
 back.href=PORTAL;boot();
 <\/script></body></html>`;
  downloadBlob(new Blob([h],{type:"text/html;charset=utf-8"}),"index.html");
